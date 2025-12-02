@@ -5,9 +5,11 @@ import * as THREE from 'three';
 
 interface ArrowIndicatorsProps {
   cubiePosition: Vector3;
+  clickedFaceNormal: Vector3; // The normal of the face the user clicked
   onRotate: (move: MoveType) => void;
 }
 
+// Helper: Reusable Arrow Component
 const ArrowMesh: React.FC<{
   position: Vector3;
   direction: Vector3;
@@ -17,163 +19,180 @@ const ArrowMesh: React.FC<{
   // Normalize direction
   const dir = new THREE.Vector3(...direction).normalize();
   
-  // Default cone points up (0,1,0)
+  // Default cone points up (0,1,0), rotate to match dir
   const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
 
   return (
-    <group position={position} quaternion={quaternion} onClick={(e) => { e.stopPropagation(); onClick(); }}>
-      {/* Floating Animation / Hover effect could be added here */}
-      <mesh position={[0, -0.1, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.4, 8]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
-      </mesh>
-      <mesh position={[0, 0.2, 0]}>
-        <coneGeometry args={[0.12, 0.25, 12]} />
-        <meshBasicMaterial color={color} toneMapped={false} />
-      </mesh>
+    <group position={position} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+      <group quaternion={quaternion}>
+        {/* Shaft */}
+        <mesh position={[0, -0.15, 0]}>
+            <cylinderGeometry args={[0.04, 0.04, 0.3, 8]} />
+            <meshBasicMaterial color={color} toneMapped={false} />
+        </mesh>
+        {/* Head */}
+        <mesh position={[0, 0.05, 0]}>
+            <coneGeometry args={[0.12, 0.25, 12]} />
+            <meshBasicMaterial color={color} toneMapped={false} />
+        </mesh>
+      </group>
       
-      {/* Hitbox */}
-      <mesh visible={false} scale={[2, 1.5, 2]}>
-         <cylinderGeometry args={[0.15, 0.15, 0.6]} />
+      {/* Invisible Hitbox for easier clicking */}
+      <mesh visible={false} scale={[2, 2, 2]}>
+         <boxGeometry args={[0.2, 0.2, 0.2]} />
          <meshBasicMaterial />
       </mesh>
     </group>
   );
 };
 
-export const ArrowIndicators: React.FC<ArrowIndicatorsProps> = ({ cubiePosition, onRotate }) => {
+export const ArrowIndicators: React.FC<ArrowIndicatorsProps> = ({ cubiePosition, clickedFaceNormal, onRotate }) => {
   const [x, y, z] = cubiePosition;
   const arrows: React.ReactNode[] = [];
+  const normalVec = new THREE.Vector3(...clickedFaceNormal);
   
-  // Configuration
-  const FACE_OFFSET = 0.52; // Height above the face surface
-  const EDGE_OFFSET = 0.42; // How far towards the edge of the block to push the arrow
+  // Constants
+  const FACE_OFFSET = 0.6; 
+  const RING_OFFSET = 0.35; 
 
-  // Helper to place an arrow based on movement
-  const addArrow = (
-    axisName: 'x' | 'y' | 'z', // The face we are drawing on (e.g. 'z' for Front face)
-    faceVal: number, // 1 (Front/Right/Up) or -1 (Back/Left/Down)
-    moveCode: MoveType
-  ) => {
-    
-    // 1. Determine rotation parameters
-    let targetAxis: 'x'|'y'|'z' = 'x';
-    let targetDir = 1;
-
-    if (moveCode.startsWith('R')) { targetAxis = 'x'; targetDir = -1; }
-    else if (moveCode.startsWith('L')) { targetAxis = 'x'; targetDir = 1; }
-    else if (moveCode.startsWith('U')) { targetAxis = 'y'; targetDir = -1; }
-    else if (moveCode.startsWith('D')) { targetAxis = 'y'; targetDir = 1; }
-    else if (moveCode.startsWith('F')) { targetAxis = 'z'; targetDir = -1; }
-    else if (moveCode.startsWith('B')) { targetAxis = 'z'; targetDir = 1; }
-    if (moveCode.includes("'")) targetDir *= -1;
-
-    // 2. Calculate the raw vector of movement (Secant)
-    const nextPos = getRotationResult(cubiePosition, targetAxis, targetDir);
-    let moveDir = new THREE.Vector3(
-        nextPos[0] - x,
-        nextPos[1] - y,
-        nextPos[2] - z
-    );
-
-    // 3. Center Piece Logic (unchanged visual ring)
-    const isCenter = moveDir.lengthSq() === 0;
-
-    if (isCenter) {
-        const isCW = !moveCode.includes("'");
-        if (!isCW) return; // Only render CW ring for cleanliness
-
-        if (axisName === 'z') { // Front/Back
-            arrows.push(<ArrowMesh key={`${moveCode}-t`} position={[x, y + EDGE_OFFSET, z + (faceVal * FACE_OFFSET)]} direction={[faceVal, 0, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-r`} position={[x + EDGE_OFFSET, y, z + (faceVal * FACE_OFFSET)]} direction={[0, -faceVal, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-b`} position={[x, y - EDGE_OFFSET, z + (faceVal * FACE_OFFSET)]} direction={[-faceVal, 0, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-l`} position={[x - EDGE_OFFSET, y, z + (faceVal * FACE_OFFSET)]} direction={[0, faceVal, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-        } else if (axisName === 'y') { // Up/Down
-            arrows.push(<ArrowMesh key={`${moveCode}-t`} position={[x, y + (faceVal * FACE_OFFSET), z - EDGE_OFFSET]} direction={[faceVal, 0, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-r`} position={[x + EDGE_OFFSET, y + (faceVal * FACE_OFFSET), z]} direction={[0, 0, faceVal]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-b`} position={[x, y + (faceVal * FACE_OFFSET), z + EDGE_OFFSET]} direction={[-faceVal, 0, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-            arrows.push(<ArrowMesh key={`${moveCode}-l`} position={[x - EDGE_OFFSET, y + (faceVal * FACE_OFFSET), z]} direction={[0, 0, -faceVal]} onClick={() => onRotate(moveCode)} color="white"/>);
-        } else { // Left/Right
-             arrows.push(<ArrowMesh key={`${moveCode}-t`} position={[x + (faceVal * FACE_OFFSET), y + EDGE_OFFSET, z]} direction={[0, 0, faceVal]} onClick={() => onRotate(moveCode)} color="white"/>);
-             arrows.push(<ArrowMesh key={`${moveCode}-f`} position={[x + (faceVal * FACE_OFFSET), y, z + EDGE_OFFSET]} direction={[0, -faceVal, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-             arrows.push(<ArrowMesh key={`${moveCode}-b`} position={[x + (faceVal * FACE_OFFSET), y - EDGE_OFFSET, z]} direction={[0, 0, -faceVal]} onClick={() => onRotate(moveCode)} color="white"/>);
-             arrows.push(<ArrowMesh key={`${moveCode}-bk`} position={[x + (faceVal * FACE_OFFSET), y, z - EDGE_OFFSET]} direction={[0, faceVal, 0]} onClick={() => onRotate(moveCode)} color="white"/>);
-        }
-
-    } else {
-        // 4. Refined Logic for Edge/Corner Pieces
-        // Issue: Naive diff (moveDir) creates diagonal arrows for Edge pieces (e.g. Front->Top).
-        // Solution: Snap to cardinal direction relative to the face.
-
-        // Zero out the component normal to the face (we only want direction ON the face)
-        if (axisName === 'x') moveDir.x = 0;
-        if (axisName === 'y') moveDir.y = 0;
-        if (axisName === 'z') moveDir.z = 0;
-
-        // If diagonal (both non-zero), pick the dominant axis based on current position (Tangent Snap)
-        // For an edge piece (e.g. at y=0, z=1 on X-face), rotation moves along Y. Z changes "into" depth.
-        // We keep the component that slides ALONG the face boundary we are currently on.
-        if (Math.abs(moveDir.x) > 0.1 && Math.abs(moveDir.y) > 0.1) {
-             // Diagonal on XY plane (shouldn't happen for standard moves but just in case)
-        } else if (Math.abs(moveDir.y) > 0.1 && Math.abs(moveDir.z) > 0.1) {
-            // Diagonal on YZ plane (Right Face)
-            // If we are at Z edge (abs(z)=1), we move along Y. Keep Y.
-            if (Math.abs(z) > 0.9) moveDir.z = 0;
-            // If we are at Y edge (abs(y)=1), we move along Z. Keep Z.
-            else if (Math.abs(y) > 0.9) moveDir.y = 0;
-        } else if (Math.abs(moveDir.x) > 0.1 && Math.abs(moveDir.z) > 0.1) {
-            // Diagonal on XZ plane (Up Face)
-            if (Math.abs(z) > 0.9) moveDir.z = 0;
-            else if (Math.abs(x) > 0.9) moveDir.x = 0;
-        } else if (Math.abs(moveDir.x) > 0.1 && Math.abs(moveDir.y) > 0.1) {
-             // Diagonal on XY plane (Front Face)
-             if (Math.abs(y) > 0.9) moveDir.y = 0;
-             else if (Math.abs(x) > 0.9) moveDir.x = 0;
-        }
-
-        moveDir.normalize();
-
-        // Calculate offset position to push arrow to the edge of the block
-        const arrowPos = new THREE.Vector3(x, y, z);
-        if (axisName === 'x') arrowPos.x += faceVal * FACE_OFFSET;
-        if (axisName === 'y') arrowPos.y += faceVal * FACE_OFFSET;
-        if (axisName === 'z') arrowPos.z += faceVal * FACE_OFFSET;
-
-        // Push towards the direction of movement
-        arrowPos.add(moveDir.clone().multiplyScalar(EDGE_OFFSET));
-
-        arrows.push(
-            <ArrowMesh 
-                key={moveCode}
-                position={[arrowPos.x, arrowPos.y, arrowPos.z]}
-                direction={[moveDir.x, moveDir.y, moveDir.z]}
-                onClick={() => onRotate(moveCode)}
-                color="#4ade80"
-            />
-        );
-    }
+  const moveDefs: Record<string, { axis: 'x'|'y'|'z', dir: number }> = {
+      'R': { axis: 'x', dir: -1 },
+      'L': { axis: 'x', dir: 1 },
+      'U': { axis: 'y', dir: -1 },
+      'D': { axis: 'y', dir: 1 },
+      'F': { axis: 'z', dir: -1 },
+      'B': { axis: 'z', dir: 1 },
   };
 
-  // Logic to determine which face to render arrows on
-  const checkAndAdd = (axis: 'x'|'y'|'z', val: number, cw: MoveType, ccw: MoveType) => {
-      const isCorrectFace = (axis === 'x' && x === val) || (axis === 'y' && y === val) || (axis === 'z' && z === val);
-      if (isCorrectFace) {
-          addArrow(axis, val, cw);
-          addArrow(axis, val, ccw);
+  const createArrowElement = (key: string, pos: Vector3, dir: Vector3, label: string, color: string = "#4ade80") => {
+      arrows.push(
+        <ArrowMesh 
+            key={key}
+            position={pos}
+            direction={dir}
+            onClick={() => onRotate(label as MoveType)}
+            color={color}
+        />
+      );
+  };
+
+  const generateArrow = (moveCode: MoveType) => {
+      const baseCode = moveCode.replace("'", "");
+      const def = moveDefs[baseCode];
+      
+      let effectiveDir = def.dir;
+      if (moveCode.includes("'")) effectiveDir *= -1;
+
+      // 1. Is this block affected by this move?
+      const isAffected = 
+          (baseCode === 'R' && x === 1) ||
+          (baseCode === 'L' && x === -1) ||
+          (baseCode === 'U' && y === 1) ||
+          (baseCode === 'D' && y === -1) ||
+          (baseCode === 'F' && z === 1) ||
+          (baseCode === 'B' && z === -1);
+      
+      if (!isAffected) return;
+
+      // 2. Calculate Displacement
+      const startPos = new THREE.Vector3(x, y, z);
+      const nextPosVec = getRotationResult([x, y, z], def.axis, effectiveDir);
+      const nextPos = new THREE.Vector3(...nextPosVec);
+      
+      const displacement = new THREE.Vector3().subVectors(nextPos, startPos);
+
+      // 3. Logic Filter based on Displacement vs Clicked Face Normal
+      
+      // Case A: Center Piece Rotation (Displacement is 0)
+      // If displacement is effectively zero, it's a center piece rotating in place.
+      if (displacement.lengthSq() < 0.1) {
+          // Only show rotation arrows if the rotation axis aligns with the normal.
+          // e.g. Clicking Front Face (Normal Z) and doing F move (Axis Z).
+          
+          let axisVec = new THREE.Vector3();
+          if (def.axis === 'x') axisVec.set(1, 0, 0);
+          if (def.axis === 'y') axisVec.set(0, 1, 0);
+          if (def.axis === 'z') axisVec.set(0, 0, 1);
+
+          // Check alignment (abs dot product should be close to 1)
+          if (Math.abs(axisVec.dot(normalVec)) > 0.9) {
+             // Show Ring Arrow for this move
+             // We want to place the arrow on the edge of the center piece.
+             // We need a tangent direction.
+             // For a center piece, we can pick 4 cardinal points around it.
+             // But to keep it simple and not cluttered, let's just show ONE or TWO arrows?
+             // User asked for fewer arrows.
+             // Let's show 1 arrow for standard, 1 for prime?
+             // Or maybe 4 small arrows is actually cleaner for centers because it signifies "Spin".
+             // Let's stick to the previous Ring logic but filtered.
+             
+             // To simplify: Just put one arrow on the Top edge (relative to face) pointing right/left?
+             // Actually, let's keep the ring but maybe just 2 arrows? 
+             // Let's just create one arrow at the "Top" of the face pointing in rotation direction.
+             
+             // Find "Up" relative to the face normal
+             let up = new THREE.Vector3(0, 1, 0);
+             if (Math.abs(normalVec.y) > 0.9) up = new THREE.Vector3(0, 0, -1); // If looking at Top/Bottom, Up is Back
+             
+             // Create offset
+             up.applyAxisAngle(axisVec, 0); // No rotation needed initially
+             const ringPos = startPos.clone().add(up.clone().multiplyScalar(RING_OFFSET));
+             
+             // Calculate tangent direction at that ring position
+             // Tangent = Axis x Radius
+             const radius = new THREE.Vector3().subVectors(ringPos, startPos);
+             const tangent = new THREE.Vector3().crossVectors(axisVec, radius).multiplyScalar(effectiveDir).normalize();
+             
+             // Push out to face
+             ringPos.add(normalVec.clone().multiplyScalar(FACE_OFFSET));
+             
+             createArrowElement(
+                 `${moveCode}-center`,
+                 [ringPos.x, ringPos.y, ringPos.z],
+                 [tangent.x, tangent.y, tangent.z],
+                 moveCode,
+                 "#ffffff"
+             );
+          }
+          return;
       }
-  }
 
-  // Right / Left
-  if (x === 1) checkAndAdd('x', 1, 'R', "R'");
-  if (x === -1) checkAndAdd('x', -1, "L'", 'L');
+      // Case B: Edge/Corner Translation
+      // We only want to show arrows that move PARALLEL to the clicked face.
+      // i.e. Displacement dot Normal == 0.
+      
+      const dot = displacement.clone().normalize().dot(normalVec);
+      
+      // Allow slight tolerance, but basically strictly 0.
+      // If dot is positive, it moves OUT (towards user). 
+      // If dot is negative, it moves IN (away from user).
+      // We only want 0 (sliding).
+      
+      if (Math.abs(dot) > 0.1) return; // Skip if moving into/out of face
 
-  // Up / Down
-  if (y === 1) checkAndAdd('y', 1, 'U', "U'");
-  if (y === -1) checkAndAdd('y', -1, "D'", 'D');
+      // Project displacement to ensure it's snapped to surface
+      const direction = displacement.clone().normalize();
+      
+      // Calculate Arrow Position
+      // Start at center
+      const arrowPos = startPos.clone();
+      
+      // Push out to surface
+      arrowPos.add(normalVec.clone().multiplyScalar(FACE_OFFSET));
+      
+      // Push towards the direction of movement (so it sits on the edge)
+      arrowPos.add(direction.clone().multiplyScalar(0.4));
 
-  // Front / Back
-  if (z === 1) checkAndAdd('z', 1, 'F', "F'");
-  if (z === -1) checkAndAdd('z', -1, "B'", 'B');
+      createArrowElement(
+          `${moveCode}-edge`,
+          [arrowPos.x, arrowPos.y, arrowPos.z],
+          [direction.x, direction.y, direction.z],
+          moveCode
+      );
+  };
+
+  // Check all moves
+  ['R', 'R\'', 'L', 'L\'', 'U', 'U\'', 'D', 'D\'', 'F', 'F\'', 'B', 'B\''].forEach(m => generateArrow(m as MoveType));
 
   return <>{arrows}</>;
 };

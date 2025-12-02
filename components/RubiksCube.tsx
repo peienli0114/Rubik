@@ -37,17 +37,19 @@ const generateSolvedCube = (): CubieData[] => {
 };
 
 // Animation config
-const ANIMATION_SPEED = 0.15; // Radians per frame approx, or step size
+const ANIMATION_SPEED = 0.15; // Radians per frame approx
 const TOTAL_ROTATION = Math.PI / 2;
 
 export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChange, externalSelectedFaces }) => {
   const [cubies, setCubies] = useState<CubieData[]>(generateSolvedCube());
   const [selectedCubieId, setSelectedCubieId] = useState<number | null>(null);
+  const [clickedFaceNormal, setClickedFaceNormal] = useState<Vector3 | null>(null);
   
   // Clear internal selection if external faces are cleared (e.g. background click)
   useEffect(() => {
     if (externalSelectedFaces && externalSelectedFaces.length === 0) {
       setSelectedCubieId(null);
+      setClickedFaceNormal(null);
     }
   }, [externalSelectedFaces]);
 
@@ -78,6 +80,7 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
     currentMove.current = null;
     isAnimating.current = false;
     setSelectedCubieId(null);
+    setClickedFaceNormal(null);
     onSelectionChange?.([]);
   }, [onSelectionChange]);
 
@@ -88,6 +91,7 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
         triggerRotate(randomMove);
     }
     setSelectedCubieId(null);
+    setClickedFaceNormal(null);
   }, [triggerRotate]);
 
   // Expose controls to parent
@@ -103,13 +107,25 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
 
   // Handle click on a specific cubie
   const handleCubieClick = (e: ThreeEvent<MouseEvent>, cubie: CubieData) => {
-    // Stop propagation so we don't trigger background clicks if we implemented them on canvas
     e.stopPropagation();
 
-    // Prevent selection during animation to avoid logic errors
+    // Prevent selection during animation
     if (isAnimating.current) return;
 
     setSelectedCubieId(cubie.id);
+    
+    // Capture and snap normal
+    if (e.normal) {
+        const n = e.normal.clone().normalize();
+        // Snap to nearest axis to handle slight float errors or rotation drift
+        const maxComp = Math.max(Math.abs(n.x), Math.abs(n.y), Math.abs(n.z));
+        const snapped: Vector3 = [
+            Math.abs(n.x) === maxComp ? Math.sign(n.x) : 0,
+            Math.abs(n.y) === maxComp ? Math.sign(n.y) : 0,
+            Math.abs(n.z) === maxComp ? Math.sign(n.z) : 0,
+        ];
+        setClickedFaceNormal(snapped);
+    }
 
     // Determine which faces can move based on current logical position
     const [x, y, z] = roundVector(cubie.position);
@@ -127,6 +143,14 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
     if (z === 1) validFaces.push('F');
     if (z === -1) validFaces.push('B');
     
+    // Also consider Center pieces (x=0, y=0, etc) as valid controls for that face
+    if (x === 0 && y === 0 && z === 1) validFaces.push('F');
+    if (x === 0 && y === 0 && z === -1) validFaces.push('B');
+    if (x === 1 && y === 0 && z === 0) validFaces.push('R');
+    if (x === -1 && y === 0 && z === 0) validFaces.push('L');
+    if (x === 0 && y === 1 && z === 0) validFaces.push('U');
+    if (x === 0 && y === -1 && z === 0) validFaces.push('D');
+
     onSelectionChange?.(validFaces);
   };
 
@@ -141,8 +165,8 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
 
       // Parse move
       switch (move[0]) {
-        case 'R': axis = 'x'; layer = 1; direction = -1; break; // Right Face, X=1
-        case 'L': axis = 'x'; layer = -1; direction = 1; break; // Left Face, X=-1
+        case 'R': axis = 'x'; layer = 1; direction = -1; break; // Right Face, X=1 (CW is -90)
+        case 'L': axis = 'x'; layer = -1; direction = 1; break; // Left Face, X=-1 (CW is +90)
         case 'U': axis = 'y'; layer = 1; direction = -1; break; // Up Face, Y=1
         case 'D': axis = 'y'; layer = -1; direction = 1; break; // Down Face, Y=-1
         case 'F': axis = 'z'; layer = 1; direction = -1; break; // Front Face, Z=1
@@ -168,7 +192,6 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
 
     // 2. Handle current animation
     if (isAnimating.current && currentMove.current) {
-      // Speed up animation if queue is large (fast scramble)
       const speed = animationQueue.current.length > 5 ? ANIMATION_SPEED * 4 : ANIMATION_SPEED;
       
       currentMove.current.progress += speed;
@@ -176,7 +199,7 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
       if (currentMove.current.progress >= TOTAL_ROTATION) {
         // Animation Complete
         const { axis, direction, activeCubieIds } = currentMove.current;
-        const angle = direction * -1 * (Math.PI / 2); // 90 degrees
+        const angle = direction * (Math.PI / 2); // 90 degrees
 
         setCubies(prevCubies => {
           return prevCubies.map(c => {
@@ -202,7 +225,7 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
             );
             const rotQuat = new THREE.Quaternion().setFromAxisAngle(axisVec, angle);
             
-            // World rotation: q_new = q_rot * q_old
+            // World rotation: q_new = q_rot * q_old (premultiply)
             objQuat.premultiply(rotQuat);
             
             const newEuler = new THREE.Euler().setFromQuaternion(objQuat);
@@ -226,9 +249,10 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
   return (
     <group>
       {/* Render Arrows if a cubie is selected and not animating */}
-      {selectedCubie && !isAnimating.current && (
+      {selectedCubie && !isAnimating.current && clickedFaceNormal && (
         <ArrowIndicators 
             cubiePosition={selectedCubie.position} 
+            clickedFaceNormal={clickedFaceNormal}
             onRotate={triggerRotate} 
         />
       )}
@@ -240,7 +264,7 @@ export const RubiksCube: React.FC<RubiksCubeProps> = ({ onReady, onSelectionChan
 
         if (isAnimating.current && currentMove.current && currentMove.current.activeCubieIds.includes(c.id)) {
             const { axis, direction, progress } = currentMove.current;
-            const angle = direction * -1 * progress;
+            const angle = direction * progress;
             
             // Visual Position Rotation (Orbit around center)
             if (axis === 'x') visualPosition = rotateX(visualPosition, angle);

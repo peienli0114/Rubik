@@ -23,7 +23,7 @@ export const Cubie: React.FC<CubieProps> = ({ position, rotation, initialPositio
   const STICKER_SIZE = 0.85; // Size of the colored sticker
   const STICKER_OFFSET = CUBE_SIZE / 2 + 0.005; // Offset to sit on top of the face
   const STICKER_THICKNESS = 0.01; // Thin layer for the sticker
-
+  
   return (
     <group position={position} rotation={rotation} scale={[scale, scale, scale]} onClick={onClick}>
       {/* Base Black Plastic Cube - Glows when selected */}
