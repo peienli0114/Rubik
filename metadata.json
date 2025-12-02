@@ -1,0 +1,5 @@
+{
+  "name": "React 3D Rubik's Cube",
+  "description": "A fully functional, interactive 3D Rubik's Cube built with React Three Fiber. Features smooth animations, scramble logic, and touch controls.",
+  "requestFramePermissions": []
+}
